@@ -1,0 +1,37 @@
+node('docker-follower-basic')
+{
+//   stage('Menu')
+//     {
+//       properties([parameters([[$class: 'ExtensibleChoiceParameterDefinition', choiceListProvider: [$class: 'TextareaChoiceListProvider', addEditedValue: false, choiceListText: '''jenkins-follower-terraform
+// jenkins-follower-basic
+// jenkins-follower-chef
+// jenkins-follower-packer
+// ''', defaultChoice: 'jenkins-follower-terraform'], description: 'Please choose the image to refresh', editable: false, name: 'Image_Name']]), pipelineTriggers([])])
+//     }
+  stage('SCM')
+    {
+     git credentialsId: 'd6101d93-2318-42ba-8403-69e082b8f192', url: 'git@bitbucket.org:elastera/docker-elastera-jenkins.git'
+     sh'df -h'
+    }
+stage('AWS_Auth')
+{
+  sh 'service docker start'
+  sh '$(aws --region=eu-west-1 ecr get-login)'
+}
+stage('Building')
+  {
+    // sh 'docker-compose build --force-rm ${Image_Name}'
+    // sh 'docker-compose push ${Image_Name}'
+    sh 'docker-compose build --force-rm jenkins-follower-basic'
+    sh 'docker-compose push jenkins-follower-basic'
+    sh 'docker-compose build --force-rm jenkins-follower-terraform'
+    sh 'docker-compose push jenkins-follower-terraform'
+    sh 'docker-compose build --force-rm jenkins-follower-chef'
+    sh 'docker-compose push jenkins-follower-chef'
+    sh 'docker-compose build --force-rm jenkins-follower-packer'
+    sh 'docker-compose push jenkins-follower-packer'
+
+  }
+
+
+}

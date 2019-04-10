@@ -1,0 +1,79 @@
+//run this on the master node as we are doing a backup.
+//noinspection GroovyAssignabilityCheck
+properties([
+        buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '1', daysToKeepStr: '', numToKeepStr: '1')),
+        pipelineTriggers([cron('H H * * *')])
+])
+
+node('leader') {
+    try {
+        wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'XTerm']) {
+            stage "Copy files for backing up"
+            // Delete all files in the workspace
+            sh "rm -rf *"
+            // Create a directory for the job definitions
+            sh "mkdir -p ${env.BUILD_NUMBER}/jobs"
+            // Copy global configuration files into the workspace
+            sh "cp ${env.JENKINS_HOME}/*.xml ${env.BUILD_NUMBER}"
+            // Copy keys and secrets into the workspace
+            sh "cp ${env.JENKINS_HOME}/identity.key.enc ${env.BUILD_NUMBER}/"
+            sh "cp ${env.JENKINS_HOME}/secret.key ${env.BUILD_NUMBER}/"
+            sh "cp ${env.JENKINS_HOME}/secret.key.not-so-secret ${env.BUILD_NUMBER}/"
+            sh "cp -r ${env.JENKINS_HOME}/secrets ${env.BUILD_NUMBER}/"
+            sh "cp -r ${env.JENKINS_HOME}/.ssh ${env.BUILD_NUMBER}/"
+            // Copy user configuration files into the workspace
+            sh "cp -r ${env.JENKINS_HOME}/users ${env.BUILD_NUMBER}/"
+            // Copy of the key used to access bitbucket
+            sh "cp -r ${env.JENKINS_HOME}/bitbucket_jenkins.rsa ${env.BUILD_NUMBER}/"
+            // Copy job definitions into the workspace
+            sh "rsync -am --include='config.xml' --include='*/' --prune-empty-dirs --exclude='*' ${env.JENKINS_HOME}/jobs/ ${env.BUILD_NUMBER}/jobs/"
+            //Get the current date for the filename.
+            def date = sh (
+                    script: 'date +%F',
+                    returnStdout: true
+            ).trim()
+            // Create an archive from all copied files (since the S3 plugin cannot copy folders recursively)
+            stage "Compress files"
+            sh "tar czf ${date}-jenkins-backup.tar.gz ${env.BUILD_NUMBER}/"
+            // Remove the directory so only the archive gets copied to S3
+            sh "rm -rf ${env.BUILD_NUMBER}"
+            stage "Archive the tar ball"
+            archive "*.tar.gz"
+
+            stage "Copy to S3"
+            step([$class                              : 'S3BucketPublisher',
+                  consoleLogLevel: 'INFO',
+                  dontWaitForConcurrentBuildCompletion: false,
+                  entries                             : [
+                          [
+                                  bucket                 : 'jenkins-resources-s3jenkinsbucket-awh230anuezj/backups',
+                                  excludedFile           : '',
+                                  flatten                : true,
+                                  gzipFiles              : false,
+                                  keepForever            : false,
+                                  managedArtifacts       : false,
+                                  noUploadOnFailure      : true,
+                                  selectedRegion         : 'eu-west-1',
+                                  sourceFile             : '**/*tar.gz',
+                                  storageClass           : 'STANDARD',
+                                  uploadFromSlave        : false,
+                                  useServerSideEncryption: false
+                          ]
+                  ],
+                  pluginFailureResultConstraint: 'FAILURE',
+                  profileName                         : 'elastera-jenkins', userMetadata: []])
+
+            slackSend channel: "#dev",
+                    color: "good",
+                    message: "Jenkins Backup Successful: ${date}-jenkins-backup.tar.gz (<${env.JOB_URL}|Open>)"
+        }
+    } catch (error) {
+        slackSend channel: "#dev",
+                color: "danger",
+                message: "Jenkins Backup Failed: ${env.JOB_NAME} - ${env.BUILD_NUMBER} (<${env.JOB_URL}|Open>)"
+
+        throw error
+    } finally {
+    }
+
+}

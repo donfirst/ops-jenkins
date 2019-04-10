@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Creates the various resources used by Jenkins. These are the EBS volume, an S3 Bucket
+  docker repositories and roles that will be used by the slaves
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Jenkins Configuration
+      Parameters:
+      - pEnvironment
+  Identifier:
+    Value: template-jenkins-resources
+  Input:
+    Description: Environment the template is being deployed to.
+  Output:
+    Description: Outputs ID of all deployed resources.
+  Stack:
+    Value: '2'
+  VersionDate:
+    Value: '20160510'
+Parameters:
+  pEnvironment:
+    Default: development
+    Description: Environment (development, test, or production)
+    Type: String
+Outputs:
+  rS3JenkinsBucket:
+    Value: !Ref S3JenkinsBucket
+    Export:
+      Name: "JenkinsBucket"
+  rJenkinsEBS:
+    Value: !Ref JenkinsEBS
+    Export:
+      Name: "JenkinsEBSVolume"
+Mappings:
+  elbMap:
+    ap-northeast-1:
+      ELB: '582318560864'
+    ap-northeast-2:
+      ELB: '600734575887'
+    ap-south-1:
+      ELB: '718504428378'
+    ap-southeast-1:
+      ELB: '114774131450'
+    ap-southeast-2:
+      ELB: '783225319266'
+    eu-central-1:
+      ELB: '054676820928'
+    eu-west-1:
+      ELB: '156460612806'
+    sa-east-1:
+      ELB: '507241528517'
+    us-east-1:
+      ELB: '127311923021'
+    us-gov-west-1:
+      ELB: '048591011584'
+    us-west-1:
+      ELB: '027434742980'
+    us-west-2:
+      ELB: '797873946194'
+Resources:
+  S3JenkinsBucket:
+    DeletionPolicy: Retain
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+        - ExpirationInDays: 14
+          Prefix: backups/
+          Status: Enabled
+      Tags:
+      - Key: Name
+        Value: jenkins-bucket
+      - Key: Environment
+        Value: !Ref pEnvironment
+    Type: AWS::S3::Bucket
+  rS3AccessLogsPolicy:
+    Properties:
+      Bucket: !Ref S3JenkinsBucket
+      PolicyDocument:
+        Statement:
+        - Action:
+          - s3:PutObject
+          Effect: Allow
+          Principal:
+            AWS: !FindInMap [ elbMap, !Ref 'AWS::Region', ELB ]
+          Resource: !Join [ '', [ 'arn:aws:s3:::', !Ref S3JenkinsBucket, /Logs/AWSLogs/, !Ref 'AWS::AccountId', /* ] ]
+          Sid: ELBAccessLogs20130930
+        Version: '2008-10-17'
+    Type: AWS::S3::BucketPolicy
+  JenkinsEBS:
+    Properties:
+      AutoEnableIO: false
+      AvailabilityZone: eu-west-1a
+      Encrypted: false
+      Size: '30'
+      Tags:
+      - Key: Name
+        Value: jenkins-ebs-volume
+      - Key: Environment
+        Value: !Ref pEnvironment
+      VolumeType: standard
+    Type: AWS::EC2::Volume
+  JenkinsLeaderRepository:
+    Properties:
+      RepositoryName: elastera/jenkins-leader
+      RepositoryPolicyText:
+        Statement:
+        - Action:
+          - ecr:GetDownloadUrlForLayer
+          - ecr:BatchGetImage
+          - ecr:BatchCheckLayerAvailability
+          - ecr:PutImage
+          - ecr:InitiateLayerUpload
+          - ecr:UploadLayerPart
+          - ecr:CompleteLayerUpload
+          Effect: Allow
+          Principal:
+            AWS:
+            - !Join ['', ['arn:aws:iam::', !Ref "AWS::AccountId", ':root'] ]
+          Sid: AllowPushPull
+        Version: '2008-10-17'
+    Type: AWS::ECR::Repository
+  JenkinsFollowerRepository:
+    Properties:
+      RepositoryName: elastera/jenkins-follower
+      RepositoryPolicyText:
+        Statement:
+        - Action:
+          - ecr:GetDownloadUrlForLayer
+          - ecr:BatchGetImage
+          - ecr:BatchCheckLayerAvailability
+          - ecr:PutImage
+          - ecr:InitiateLayerUpload
+          - ecr:UploadLayerPart
+          - ecr:CompleteLayerUpload
+          Effect: Allow
+          Principal:
+            AWS:
+            - !Join ['', ['arn:aws:iam::', !Ref "AWS::AccountId", ':root'] ]
+          Sid: AllowPushPull
+        Version: '2008-10-17'
+    Type: AWS::ECR::Repository

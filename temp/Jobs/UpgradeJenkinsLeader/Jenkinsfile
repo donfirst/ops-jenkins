@@ -1,0 +1,69 @@
+node('docker-follower-basic')
+{
+  stage('Menu')
+    {
+      properties([parameters([choice(choices: "Jenkins_Plugin_Latest(Automate)\nJenkins_Plugin_FromBitBucket(Manual)\n", description: 'Please select upgrade path', name: 'Option')]), pipelineTriggers([])])
+
+    }
+  stage('SCM')
+    {
+        git branch: 'master', credentialsId: 'bitbucketwritekey', url: 'git@bitbucket.org:elastera/docker-elastera-jenkins.git'
+    }
+  if(params["Option"]=="Jenkins_Plugin_Latest(Automate)")
+    {
+      stage('Automate_Build')
+        {
+          sh 'echo automate'
+          sh 'sed \'s/:.*/:latest/1\' <leader/plugins.txt >leader/plugins1.txt'
+          sh 'rm leader/plugins.txt'
+          sh 'mv leader/plugins1.txt leader/plugins.txt'
+          sh 'cat leader/plugins.txt'
+        }
+    }
+  if(params["Option"]=="Jenkins_Plugin_FromBitBucket(Manual)")
+      {
+      stage('Manual_Build')
+        {
+          sh 'echo manual'
+        }
+      }
+  stage('Update_Plugins')
+  {
+    sh 'leader/update_plugins.py'
+    sh 'cat leader/plugins.txt'
+    sh 'service docker start'
+    sh 'docker pull jenkinsci/jenkins'
+  }
+
+  stage('AWS_Auth')
+  {
+    sh '$(aws --region=eu-west-1 ecr get-login)'
+  }
+stage('Building')
+  {
+    sh 'docker-compose build --force-rm jenkins-leader'
+    sh 'docker-compose push jenkins-leader'
+  }
+stage('PushToGit')
+{
+  Date date = new Date()
+  String datePart = date.format("dd/MM/yyyy")
+  sh 'git config --global user.name "elastera"'
+  sh 'git config --global user.email "elastera@elastera.com"'
+  // String timePart = date.format("HH:mm:ss")
+  sh 'git add leader/plugins.txt'
+  sh 'git commit -m "Jenkins Automation Job:New plugin version"'
+  sh 'git tag '+datePart
+
+ sshagent(['bitbucketwritekey']) {
+ sh "git push origin master --tags"
+ }
+
+}
+}
+
+node
+{
+  sh 'touch /var/jenkins_home/restart_control.txt'
+  sh 'echo Jenkins SERVER will be reloaded in 5 minutes time'
+}

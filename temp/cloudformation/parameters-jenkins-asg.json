@@ -1,0 +1,38 @@
+[
+    {
+        "ParameterKey"  : "pEnvironment",
+        "ParameterValue": "production"
+    },
+    {
+        "ParameterKey"  : "KeyName",
+        "ParameterValue": "aws_elastera"
+    },
+    {
+        "ParameterKey"  : "pRegionAZ1Name",
+        "ParameterValue": "eu-west-1a"
+    },
+    {
+        "ParameterKey"  : "pRegionAZ2Name",
+        "ParameterValue": "eu-west-1b"
+    },
+    {
+        "ParameterKey"  : "pRegionAZ3Name",
+        "ParameterValue": "eu-west-1c"
+    },
+    {
+        "ParameterKey"  : "pManagementCIDR",
+        "ParameterValue": "10.10.0.0/16"
+    },
+    {
+        "ParameterKey"  : "InstanceType",
+        "ParameterValue": "t2.medium"
+    },
+    {
+        "ParameterValue": "jenkins",
+        "ParameterKey": "DnsPrefix"
+    },
+    {
+        "ParameterValue": "elastera.net",
+        "ParameterKey": "DnsZone"
+    }
+]

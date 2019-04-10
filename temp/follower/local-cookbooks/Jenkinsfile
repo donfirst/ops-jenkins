@@ -1,0 +1,84 @@
+//noinspection GroovyAssignabilityCheck
+properties([
+        buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '10', daysToKeepStr: '', numToKeepStr: '10')),
+        pipelineTriggers([cron('H 8 * * 1,2,3,4,5')])
+])
+
+node('leader'){
+    stage ("Checkout repositories") {
+        checkout([
+                $class: 'GitSCM',
+                branches: [[name: '*/master']],
+                doGenerateSubmoduleConfigurations: false,
+                extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'docker-elastera-jenkins']],
+                submoduleCfg: [],
+                userRemoteConfigs: [
+                        [credentialsId: 'd6101d93-2318-42ba-8403-69e082b8f192', url: 'git@bitbucket.org:elastera/docker-elastera-jenkins.git']
+                ]
+        ])
+        checkout([
+                $class: 'GitSCM',
+                branches: [[name: '*/master']],
+                doGenerateSubmoduleConfigurations: false,
+                extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'environment-magento']],
+                submoduleCfg: [],
+                userRemoteConfigs: [
+                        [credentialsId: 'd6101d93-2318-42ba-8403-69e082b8f192', url: 'git@bitbucket.org:elastera/environment-magento.git']
+                ]
+        ])
+    }
+    stash("new-image")
+}
+
+
+node('docker-follower-basic') {
+
+    try {
+        wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'XTerm']) {
+            unstash('new-image')
+            stage("Copy Berksfile"){
+                sh("cp environment-magento/Berksfile.lock docker-elastera-jenkins/follower/local-cookbooks/.")
+                sh("cp environment-magento/Berksfile docker-elastera-jenkins/follower/local-cookbooks/.")
+            }
+
+            sh 'ip route show | awk \'/default/ {print $3}\' > docker_ip'
+            docker_ip=readFile('docker_ip').trim()
+
+            withEnv(["DOCKER_HOST=tcp://${docker_ip}:2375"]) {
+                stage("Set image repository permissions") {
+                    sh "\$(aws --region=eu-west-1 ecr get-login)"
+                }
+
+                stage("Build docker image") {
+                    dir("docker-elastera-jenkins/follower/local-cookbooks") {
+                        sh "docker build -t 085913924494.dkr.ecr.eu-west-1.amazonaws.com/elastera/jenkins-follower:local-cookbooks ."
+                    }
+                }
+
+                stage("Push docker image"){
+                    dir("docker-elastera-jenkins/follower/local-cookbooks") {
+                        sh "docker push 085913924494.dkr.ecr.eu-west-1.amazonaws.com/elastera/jenkins-follower:local-cookbooks"
+                    }
+                }
+            }
+        }
+    }
+    catch(error){
+        def messageColor = "\u001B[32m"
+        def messageColorReset = "\u001B[0m"
+
+        currentBuild.result = "FAILURE"
+        echo messageColor + "Failed to copy files." + messageColorReset
+    }
+    finally {
+        def status = currentBuild.result == "FAILURE" ? 'danger' : 'good'
+        def message = currentBuild.result == "FAILURE" ? "Build Failed - ${env.JOB_NAME}: ${env.BUILD_NUMBER}" :
+                "Build Successful - ${env.JOB_NAME}: ${env.BUILD_NUMBER}"
+
+        slackSend(
+                message: message,
+                color: status,
+                channel: "#dev"
+        )
+    }
+}

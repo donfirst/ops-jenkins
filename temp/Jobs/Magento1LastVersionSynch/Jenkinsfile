@@ -1,0 +1,46 @@
+
+node('follower-terraform')
+{
+   stage('Menu')
+    {
+       properties([parameters([[$class: 'ExtensibleChoiceParameterDefinition', choiceListProvider: [$class: 'SystemGroovyChoiceListProvider', scriptText: '''def gettags = "git ls-remote -h https://github.com/OpenMage/magento-lts.git".execute()
+
+    return gettags.text.readLines().collect { it.split()[1].replaceAll(\'\\\\^\\\\{\\\\}\', \'\').replaceAll(\'refs/\\\\w+/\', \'\')  }.unique().findAll { !it.startsWith(\'Branch_\') }''', usePredefinedVariables: false], description: 'ChooseMagentoDistribution', editable: false, name: 'ChooseMagentoDistribution']]), pipelineTriggers([])])
+    }
+   stage ('Checkout')
+    {
+      def project_source_path= "source"
+      dir(project_source_path)
+        {
+          checkout([$class: 'GitSCM', branches: [[name: '${ChooseMagentoDistribution}']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[url: 'https://github.com/OpenMage/magento-lts.git']]])
+          sh 'yes |rm -rf .git'
+          stash name: 'data', includes: '**'
+        }
+      def project_destination_path= "destination"
+      dir(project_destination_path)
+        {
+           //checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'bitbucketwritekey', url: 'git@bitbucket.org:elastera/magento-ce19.git']]])
+           try
+            {
+             checkout([$class: 'GitSCM', branches: [[name: 'depot_${ChooseMagentoDistribution}']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'bitbucketwritekey', url: 'git@bitbucket.org:elastera/magento-ce19.git']]])
+            }catch (e)
+             {
+               //   checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'bitbucketwritekey', url: 'git@bitbucket.org:elastera/magento-ce19.git']]])
+              checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'bitbucketwritekey', url: 'git@bitbucket.org:elastera/magento-ce19.git']]])
+              sh 'git branch depot_${ChooseMagentoDistribution}'
+              sh 'git checkout depot_${ChooseMagentoDistribution}'
+              sh 'git rm -rf .'
+              unstash 'data'
+              sh 'git config --global user.name "elastera"'
+              sh 'git config --global user.email "elastera@elastera.com"'
+              sh 'git add *'
+              sh 'git commit -m "Jenkins Automation Job:New plugin version"'
+              sshagent(['bitbucketwritekey'])
+                {
+                  sh "git push origin depot_${ChooseMagentoDistribution}"
+                }
+              }
+        }
+     }
+
+}

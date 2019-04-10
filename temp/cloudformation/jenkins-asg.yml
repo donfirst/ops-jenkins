@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Region Config
+      Parameters:
+      - pRegionAZ1Name
+      - pRegionAZ2Name
+      - pRegionAZ3Name
+    - Label:
+        default: Network (existing VPC config)
+      Parameters:
+      - pProductionVPC
+      - pManagementCIDR
+      - pEnvironment
+  Identifier:
+    Value: template-jenkins-asg
+  Input:
+    Description: VPC, SubnetIDs, S3 bucket names, CIDR blocks, KeyNames, AMIs
+  Output:
+    Description: Outputs ID of all deployed resources
+  Stack:
+    Value: 1
+  VersionDate:
+    Value: 20161025
+Description: Launches the elastera Jenkins Server.
+Mappings:
+  RegionMap:
+    eu-west-1:
+      AMI: ami-7abd0209
+#Outputs:
+#  DnsAddress:
+#    Description: Jenkins URL
+#    Value: !Join ['',[ 'http://', !Ref DnsRecordJenkins ] ]
+Parameters:
+  pRegionAZ1Name:
+    Default: eu-west-1a
+    Description: Availability Zone 1 Name in Region
+    Type: String
+  pRegionAZ2Name:
+    Default: eu-west-1b
+    Description: Availability Zone 2 Name in Region
+    Type: String
+  pRegionAZ3Name:
+    Default: eu-west-1c
+    Description: Availability Zone 3 Name in Region
+    Type: String
+  DnsPrefix:
+    Default: jenkins
+    Description: Prefix for Jenkins' DNS record (<prefix>.<zone>)
+    Type: String
+  DnsZone:
+    Default: elastera.net
+    Description: Route53-hosted zone to use for the DNS record (<prefix>.<zone>)
+    Type: String
+  InstanceType:
+    ConstraintDescription: must be a valid EC2 instance type.
+    Description: EC2 instance type
+    Type: String
+  KeyName:
+    Description: Name of an existing EC2 keypair to enable SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+  pEnvironment:
+    Default: development
+    Description: Environment type (development, test, or production)
+    Type: String
+  pManagementCIDR:
+    Description: Management VPC CIDR
+    Type: String
+Resources:
+#  DnsRecordJenkins:
+#    Properties:
+#      Comment: Jenkins Server
+#      HostedZoneName: !Join ['', [ !Ref DnsZone, . ] ]
+#      Name: !Join ['', [ !Ref DnsPrefix, ., !Ref DnsZone, . ] ]
+#      ResourceRecords: [ !GetAtt [ ELBJenkins, DNSName ] ]
+#      TTL: 900
+#      Type: CNAME
+#    Type: AWS::Route53::RecordSet
+  ELBJenkins:
+    Properties:
+      AccessLoggingPolicy:
+        EmitInterval: '60'
+        Enabled: 'true'
+        S3BucketName: !ImportValue JenkinsBucket
+        S3BucketPrefix: Logs
+      ConnectionSettings:
+        IdleTimeout: 1800
+      HealthCheck:
+        HealthyThreshold: 3
+        Interval: 30
+        Target: TCP:8080
+        Timeout: 5
+        UnhealthyThreshold: 10
+      Listeners:
+      - InstancePort: 8080
+        LoadBalancerPort: 443
+        Protocol: HTTPS
+        PolicyNames:
+        - Elastera-ELBSecurityPolicy-2016-08-Custom
+        SSLCertificateId: "arn:aws:iam::085913924494:server-certificate/STAR.elastera.net-2017"
+      - InstancePort: 50000
+        LoadBalancerPort: 50000
+        Protocol: TCP
+      Policies:
+      - Attributes:
+        - Name: Protocol-TLSv1
+          Value: 'false'
+        - Name: Protocol-TLSv1.1
+          Value: 'true'
+        - Name: Protocol-TLSv1.2
+          Value: 'true'
+        - Name: Server-Defined-Cipher-Order
+          Value: 'true'
+        - Name: ECDHE-ECDSA-AES128-GCM-SHA256
+          Value: 'true'
+        - Name: ECDHE-RSA-AES128-GCM-SHA256
+          Value: 'true'
+        - Name: ECDHE-ECDSA-AES128-SHA256
+          Value: 'true'
+        - Name: ECDHE-RSA-AES128-SHA256
+          Value: 'true'
+        - Name: ECDHE-ECDSA-AES128-SHA
+          Value: 'true'
+        - Name: ECDHE-RSA-AES128-SHA
+          Value: 'true'
+        - Name: ECDHE-ECDSA-AES256-GCM-SHA384
+          Value: 'true'
+        - Name: ECDHE-RSA-AES256-GCM-SHA384
+          Value: 'true'
+        - Name: ECDHE-ECDSA-AES256-SHA384
+          Value: 'true'
+        - Name: ECDHE-RSA-AES256-SHA384
+          Value: 'true'
+        - Name: ECDHE-RSA-AES256-SHA
+          Value: 'true'
+        - Name: ECDHE-ECDSA-AES256-SHA
+          Value: 'true'
+        - Name: AES128-GCM-SHA256
+          Value: 'true'
+        - Name: AES128-SHA256
+          Value: 'true'
+        - Name: AES128-SHA
+          Value: 'true'
+        - Name: AES256-GCM-SHA384
+          Value: 'true'
+        - Name: AES256-SHA256
+          Value: 'true'
+        - Name: AES256-SHA
+          Value: 'true'
+        PolicyName: Elastera-ELBSecurityPolicy-2016-08-Custom
+        PolicyType: SSLNegotiationPolicyType
+      SecurityGroups:
+      - !Ref SecurityGroupJenkinsELB
+      Subnets:
+      - !ImportValue "ProductionDMZSubnetA"
+      - !ImportValue "ProductionDMZSubnetB"
+      - !ImportValue "ProductionDMZSubnetC"
+      Tags:
+      - Key: Name
+        Value: jenkins-elb
+      - Key: Environment
+        Value: !Ref pEnvironment
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+  LaunchConfigJenkins:
+    Metadata:
+      AWS::CloudFormation::Init: {}
+    Properties:
+      AssociatePublicIpAddress: 'true'
+      BlockDeviceMappings:
+      - DeviceName: /dev/sda1
+        Ebs:
+          VolumeSize: '20'
+      IamInstanceProfile: !ImportValue JenkinsInstanceProfile
+      ImageId: !FindInMap [ RegionMap, !Ref 'AWS::Region', AMI ]
+      InstanceType:
+        Ref: InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - !Ref SecurityGroupJenkins
+      #Can't use ImportValue in !Sub if they change that then can use it
+      UserData:
+        Fn::Base64: !Sub
+            - |
+              #!/bin/bash -ex
+              # Let''s go to work
+              yum update -y
+              # Install docker
+              tee /etc/yum.repos.d/docker.repo <<-'EOF'
+              [dockerrepo]
+              name=Docker Repository
+              baseurl=https://yum.dockerproject.org/repo/main/centos/$releasever/
+              enabled=1
+              gpgcheck=1
+              gpgkey=https://yum.dockerproject.org/gpg
+              EOF
+              yum install docker-engine -y
+              service docker start
+              # Install aws cli
+              easy_install awscli
+              mkdir -p ~/.aws
+              tee ~/.aws/config <<-'EOF'
+              [default]
+              region = eu-west-1
+              EOF
+              # Attach EBS volume
+              die() { status=$1; shift; echo "FATAL: $*"; exit $status; }
+              EC2_INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id || die "wget instance-id has failed: $?")
+              aws ec2 attach-volume --volume-id ${EVolume} --instance-id $EC2_INSTANCE_ID --device /dev/xvdf
+              sleep 60
+              set +e
+              lsblk -o fstype /dev/xvdf | grep -o ext4
+              if [ $? -eq 0 ]; then
+                  echo "EBS volume already formated"
+              else
+                  echo "Warning: About to make filesystem, this wil wipe the volume."
+                  mkfs -t ext4 /dev/xvdf
+              fi
+              set -e
+              mkdir -p /media/volume
+              mount /dev/xvdf /media/volume -t ext4
+              mkdir -p /media/volume/jenkins_home
+              # Start Jenkins
+              tee /etc/systemd/system/elastera-jenkins.service <<-'EOF'
+              [Unit]
+              Description=Jenkins Master
+              After=docker.service
+              After=network-online.target
+              Requires=docker.service
+              Requires=network-online.target
+              [Service]
+              ExecStartPre=/bin/bash -c 'eval $(aws ecr get-login)'
+              ExecStartPre=-/usr/bin/docker container kill elastera-jenkins
+              ExecStartPre=-/usr/bin/docker container rm elastera-jenkins
+              ExecStartPre=/usr/bin/docker image pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/elastera/jenkins-leader:latest
+              ExecStart=/usr/bin/docker container run --name elastera-jenkins -p 8080:8080 -p 50000:50000 -v /var/run/docker.sock:/var/run/docker.sock \
+              -v /media/volume/jenkins_home:/var/jenkins_home --env JAVA_OPTS="-Xmx2048m" ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/elastera/jenkins-leader:latest
+              ExecStop=/usr/bin/docker container stop elastera-jenkins
+              EOF
+              systemctl daemon-reload
+              systemctl restart elastera-jenkins
+            - { EVolume: !ImportValue JenkinsEBSVolume }
+    Type: AWS::AutoScaling::LaunchConfiguration
+  AutoScalingGroupJenkins:
+    Properties:
+      AvailabilityZones:
+      - !Ref pRegionAZ1Name
+      DesiredCapacity: '1'
+      LaunchConfigurationName: !Ref LaunchConfigJenkins
+      LoadBalancerNames:
+      - !Ref ELBJenkins
+      MaxSize: '1'
+      MinSize: '1'
+      Tags:
+      - Key: Name
+        PropagateAtLaunch: 'true'
+        Value: jenkins
+      VPCZoneIdentifier:
+      - !ImportValue "ProductionDMZSubnetA"
+    Type: AWS::AutoScaling::AutoScalingGroup
+  SecurityGroupJenkins:
+    Properties:
+      GroupDescription: Security group for the Jenkins Instance
+      SecurityGroupIngress:
+      - FromPort: 8080
+        IpProtocol: tcp
+        ToPort: 8080
+        SourceSecurityGroupId: !Ref SecurityGroupJenkinsELB
+      # Allow SSH from the bastion
+      - CidrIp: !Ref pManagementCIDR
+        FromPort: 22
+        IpProtocol: tcp
+        ToPort: 22
+      # Allow ECS Cluster/Jenkins Followers to talk to Jenkins via load balancer
+      - SourceSecurityGroupId: !Ref SecurityGroupJenkinsELB
+        IpProtocol: tcp
+        ToPort: 50000
+        FromPort: 50000
+      Tags:
+      - Key: Name
+        Value: sg-jenkins
+      - Key: Environment
+        Value: !Ref pEnvironment
+      VpcId: !ImportValue VPCProduction
+    Type: AWS::EC2::SecurityGroup
+  SecurityGroupJenkinsELB:
+    Properties:
+      GroupDescription: Security group for the Jenkins ELB
+      SecurityGroupIngress:
+      # OnCall VPN
+      - CidrIp: "78.46.128.163/32"
+        FromPort: 443
+        IpProtocol: tcp
+        ToPort: 443
+      # Elastera @ WeWork
+      - CidrIp: "62.6.190.205/32"
+        FromPort: 443
+        IpProtocol: tcp
+        ToPort: 443
+      # Incoming Bitbucket Hooks
+      - CidrIp: "104.192.143.192/28"
+        FromPort: 443
+        IpProtocol: tcp
+        ToPort: 443
+      - CidrIp: "104.192.143.208/28"
+        FromPort: 443
+        IpProtocol: tcp
+        ToPort: 443
+      # Allow ECS Cluster/Jenkins Followers to talk to the load balancer
+      # So we will allow access from the NAT.
+      - CidrIp: !Join [ '/', [ !ImportValue ProductionNATIP, '32'] ]
+        IpProtocol: tcp
+        ToPort: 50000
+        FromPort: 50000
+      - CidrIp: !Join [ '/', [ !ImportValue ProductionNATIP, '32'] ]
+        IpProtocol: tcp
+        ToPort: 443
+        FromPort: 443
+      Tags:
+      - Key: Name
+        Value: sg-jenkins-elb
+      - Key: Environment
+        Value: !Ref pEnvironment
+      VpcId: !ImportValue VPCProduction
+    Type: AWS::EC2::SecurityGroup
